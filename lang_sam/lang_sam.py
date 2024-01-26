@@ -168,8 +168,4 @@ class LangSAM():
         if area_constraints is not None or phrases_constraints is not None:
             W, H = image_pil.size
             boxes, logits, phrases = filter_by_constraints(boxes, logits, phrases, area_constraints, phrases_constraints, W, H)
-
-        if len(boxes) > 0:
-            masks = self.predict_sam(image_pil, boxes)
-            masks = masks.squeeze(1)
-        return masks, boxes, phrases, logits
+        return boxes, phrases, logits
