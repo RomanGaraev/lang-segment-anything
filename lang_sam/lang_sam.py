@@ -9,16 +9,9 @@ from groundingdino.util.inference import predict
 from groundingdino.util.slconfig import SLConfig
 from groundingdino.util.utils import clean_state_dict
 from huggingface_hub import hf_hub_download
-from segment_anything import sam_model_registry
-from segment_anything import SamPredictor
 
 from pelper import print_duration
 
-SAM_MODELS = {
-    "vit_h": "https://dl.fbaipublicfiles.com/segment_anything/sam_vit_h_4b8939.pth",
-    "vit_l": "https://dl.fbaipublicfiles.com/segment_anything/sam_vit_l_0b3195.pth",
-    "vit_b": "https://dl.fbaipublicfiles.com/segment_anything/sam_vit_b_01ec64.pth"
-}
 
 CACHE_PATH = os.environ.get("TORCH_HOME", os.path.expanduser("~/.cache/torch/hub/checkpoints"))
 
@@ -87,27 +80,9 @@ def cleanup_phrases(phrases): # [CLS] traffic light utility pole [SEP]
     return out
 
 class LangSAM():
-
-    def __init__(self, sam_type="vit_h", use_sam_masks_logits = False):
-        self.sam_type = sam_type
+    def __init__(self):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.build_groundingdino()
-        self.build_sam(sam_type)
-        self.sam_masks_logits = None
-        self.use_sam_masks_logits = use_sam_masks_logits
-
-    def build_sam(self, sam_type):
-        checkpoint_url = SAM_MODELS[sam_type]
-        try:
-            sam = sam_model_registry[sam_type]()
-            state_dict = torch.hub.load_state_dict_from_url(checkpoint_url)
-            sam.load_state_dict(state_dict, strict=True)
-        except:
-            raise ValueError(f"Problem loading SAM please make sure you have the right model type: {sam_type} \
-                and a working checkpoint: {checkpoint_url}. Recommend deleting the checkpoint and \
-                re-downloading it.")
-        sam.to(device=self.device)
-        self.sam = SamPredictor(sam)
 
     def build_groundingdino(self):
         ckpt_repo_id = "ShilongLiu/GroundingDINO"
@@ -129,41 +104,10 @@ class LangSAM():
 
         return boxes, logits, phrases
 
-    @print_duration("predict_sam")
-    def predict_sam(self, image_pil, boxes):
-        image_array = np.asarray(image_pil)
-        self.sam.set_image(image_array)
-        transformed_boxes = self.sam.transform.apply_boxes_torch(boxes, image_array.shape[:2])
-        try:
-            masks, _, masks_logits = self.sam.predict_torch(
-                point_coords=None,
-                point_labels=None,
-                boxes=transformed_boxes.to(self.sam.device),
-                mask_input=None if not self.use_sam_masks_logits else self.sam_masks_logits,
-                multimask_output=False,
-            )
-        except Exception as ex:
-            if self.use_sam_masks_logits and self.sam_masks_logits is not None:
-                print('failed to predict sam, will retry with None masks_logits')
-                self.sam_masks_logits = None
-                masks, _, masks_logits = self.sam.predict_torch(
-                    point_coords=None,
-                    point_labels=None,
-                    boxes=transformed_boxes.to(self.sam.device),
-                    mask_input=None if not self.use_sam_masks_logits else self.sam_masks_logits,
-                    multimask_output=False,
-                )
-            else:
-                raise ex
-
-        self.sam_masks_logits = masks_logits
-        return masks.cpu()
-
     @print_duration("predict")
     def predict(self, image_pil, text_prompt, box_threshold=0.3, text_threshold=0.25, area_constraints=None, phrases_constraints=None):
         boxes, logits, phrases = self.predict_dino(image_pil, text_prompt, box_threshold, text_threshold)
-        phrases = cleanup_phrases(phrases) # [CLS] traffic light utility pole [SEP]
-        masks = torch.tensor([])
+        phrases = cleanup_phrases(phrases)
 
         if area_constraints is not None or phrases_constraints is not None:
             W, H = image_pil.size
